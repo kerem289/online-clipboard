@@ -1,22 +1,26 @@
 import os
 import datetime
 from functools import wraps
-from flask import Flask, request, render_template_string, Response, make_response, redirect, url_for, jsonify
+from flask import Flask, request, render_template_string, make_response, redirect, url_for, jsonify
 
 app = Flask(__name__)
 
-# Secret key used to sign your session cookies securely
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "super-secret-key-change-this")
+# Production-safe Session Key: Strictly reads from environment variables.
+# On Render, define "FLASK_SECRET_KEY" under your service's Environment tab.
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.urandom(24).hex()
 
-# The password you will use to log in (defaults to "kerempass")
+# Private password to unlock the clipboard.
+# On Render, define "APP_PASSWORD" under your service's Environment tab.
 ACCESS_PASSWORD = os.environ.get("APP_PASSWORD", "kerempass")
 
 # In-memory database to store your shared clipboard text
 shared_data = {"text": "Welcome to your Cloud Clipboard! Paste text on your computer, view it instantly on your phone."}
 
+
 def check_auth(token):
-    # Extremely lightweight session check using cookies
+    # Lightweight session check using cookies
     return token == ACCESS_PASSWORD
+
 
 def requires_auth(f):
     @wraps(f)
@@ -28,6 +32,7 @@ def requires_auth(f):
             return redirect(url_for("login_route"))
         return f(*args, **kwargs)
     return decorated
+
 
 HTML_LOGIN_TEMPLATE = """
 <!DOCTYPE html>
@@ -46,7 +51,7 @@ HTML_LOGIN_TEMPLATE = """
 </head>
 <body>
     <div class="login-box">
-        <h2>🔒 Private Clipboard</h2>
+        <h2>Private Clipboard</h2>
         {% if error %}<p class="error">{{ error }}</p>{% endif %}
         <form method="POST">
             <input type="password" name="password" placeholder="Enter Password" autofocus required autocomplete="current-password">
@@ -81,7 +86,7 @@ HTML_CLIPBOARD_TEMPLATE = """
 <body>
     <div class="container">
         <h2>
-            <span>📋 Cloud Clipboard</span>
+            <span>Cloud Clipboard</span>
             <button class="secondary" onclick="window.location.href='/logout'" style="font-size: 13px; padding: 6px 12px;">Lock</button>
         </h2>
         <div class="box">
@@ -97,11 +102,11 @@ HTML_CLIPBOARD_TEMPLATE = """
             <pre id="shared-content">{{ current_text }}</pre>
             <div class="btn-row">
                 <button onclick="copyToClipboard()">Copy to Clipboard</button>
-                <button class="secondary" onclick="window.location.reload()">🔄 Refresh</button>
+                <button class="secondary" onclick="window.location.reload()">Refresh</button>
             </div>
         </div>
     </div>
-
+  
     <script>
         function copyToClipboard() {
             const text = document.getElementById("shared-content").innerText;
@@ -116,6 +121,7 @@ HTML_CLIPBOARD_TEMPLATE = """
 </html>
 """
 
+
 @app.route("/login", methods=["GET", "POST"])
 def login_route():
     if request.method == "POST":
@@ -129,16 +135,19 @@ def login_route():
         return render_template_string(HTML_LOGIN_TEMPLATE, error="Incorrect Password!")
     return render_template_string(HTML_LOGIN_TEMPLATE, error=None)
 
+
 @app.route("/logout")
 def logout():
     resp = make_response(redirect(url_for("login_route")))
-    resp.set_cookie("clip_session", "", expires=0) # Expire the cookie immediately
+    resp.set_cookie("clip_session", "", expires=0)  # Expire the cookie immediately
     return resp
+
 
 @app.route("/")
 @requires_auth
 def index():
     return render_template_string(HTML_CLIPBOARD_TEMPLATE, current_text=shared_data["text"])
+
 
 @app.route("/update", methods=["POST"])
 @requires_auth
@@ -146,11 +155,13 @@ def update():
     shared_data["text"] = request.form.get("content", "")
     return redirect(url_for("index"))
 
+
 # API endpoints to let you read/write from Python terminal scripts or command line
 @app.route("/api/text", methods=["GET"])
 @requires_auth
 def get_text_api():
     return jsonify({"text": shared_data["text"]})
+
 
 @app.route("/api/text", methods=["POST"])
 @requires_auth
@@ -159,6 +170,8 @@ def update_text_api():
     shared_data["text"] = body.get("text", request.form.get("content", ""))
     return jsonify({"status": "ok", "text": shared_data["text"]})
 
+
+# Fallback development server runner
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5001))
     app.run(host="0.0.0.0", port=port)
